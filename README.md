@@ -1,6 +1,6 @@
 # 📋 Kanban Task Board
 
-A lightweight, fast, and modern Kanban Task Board web application and RESTful backend powered by **Python** and **Flask**. Features an in-memory data store with seeded demo tasks, interactive drag-and-drop card workflows, priority tracking, metrics dashboard, and automated test coverage.
+A polished, responsive Kanban workspace and REST API powered by **Python**, **Flask**, and **MongoDB**. It includes persistent task management, drag-and-drop workflows, search and priority filtering, tags, assignees, due dates, theme switching, metrics, and automated test coverage.
 
 ---
 
@@ -31,6 +31,7 @@ A lightweight, fast, and modern Kanban Task Board web application and RESTful ba
 ```
 
 ### Visual Overview:
+
 - **Navigation Bar**: Displays branding, search bar with live filtering, priority selector dropdown, and the "+ New Task" modal trigger button.
 - **Metrics Dashboard**: Top counter tiles showing real-time task counts for Total Tasks, To Do, In Progress, and Done.
 - **Three Kanban Columns**:
@@ -44,12 +45,13 @@ A lightweight, fast, and modern Kanban Task Board web application and RESTful ba
 
 ## ✨ Features
 
-- **In-Memory Store**: Fast, self-contained data store requiring zero external database setup or configuration. Pre-seeded with 6 representative tasks across all statuses.
+- **MongoDB Persistence**: Configure `MONGO_URI` to persist tasks in the `taskflow.tasks` collection. If no URI is configured, the app uses the deterministic in-memory seed store for tests and offline development.
 - **Full RESTful CRUD API**:
   - Create, read, update, and delete tasks with validated input schemas.
   - Filter tasks via query parameters (`?status=todo`, `in-progress`, `done`).
   - Aggregate dashboard statistics endpoint (`/api/stats`).
 - **Drag-and-Drop Board**: Smooth HTML5 drag-and-drop card status updates with optimistic UI rendering.
+- **Work Management**: Search title, description, and tags; filter by priority; assign owners; set due dates; and organize with up to eight tags.
 - **Input Validation & Error Handling**: Comprehensive validation for required fields, enum statuses, priorities, and standard JSON HTTP error payloads (`400`, `404`, `405`, `500`).
 - **CORS Enabled**: Cross-Origin Resource Sharing enabled on all `/api/*` routes for seamless decoupled frontend or mobile clients.
 - **Polished Responsive UI**: Built with Tailwind CSS and responsive design supporting desktop, tablet, and mobile browsers.
@@ -62,7 +64,7 @@ A lightweight, fast, and modern Kanban Task Board web application and RESTful ba
 - **Backend Framework**: [Flask 3.1.1](https://palletsprojects.com/p/flask/)
 - **CORS Support**: [Flask-CORS 5.0.1](https://flask-cors.readthedocs.io/)
 - **Testing Frameworks**: [Pytest](https://docs.pytest.org/) & Python `unittest`
-- **Frontend**: HTML5, Modern Vanilla JavaScript (Fetch API & Drag-and-Drop API), Tailwind CSS
+- **Frontend**: HTML5, Modern Vanilla JavaScript (Fetch API & Drag-and-Drop API), custom responsive CSS
 - **Runtime**: Python 3.10+ (tested on Python 3.13)
 
 ---
@@ -70,17 +72,33 @@ A lightweight, fast, and modern Kanban Task Board web application and RESTful ba
 ## 🚀 Setup & Installation
 
 ### 1. Prerequisites
+
 Ensure you have Python 3.10 or newer installed:
+
 ```bash
 python3 --version
 ```
 
-### 2. Navigate to Project Directory
+### 2. Configure MongoDB
+
+Create a local environment file from the template, then set your MongoDB connection string without committing credentials:
+
+```bash
+cp .env.example .env
+export MONGO_URI='mongodb+srv://<username>:<password>@<cluster>/<database>'
+export MONGO_DB_NAME=taskflow
+```
+
+The application creates the `tasks` collection and seeds it only when it is empty. Never commit `.env` or expose the URI in frontend code.
+
+### 3. Navigate to Project Directory
+
 ```bash
 cd /Users/shaziazameer/.gemini/antigravity/scratch/task-kanban
 ```
 
-### 3. Create and Activate Virtual Environment
+### 4. Create and Activate Virtual Environment
+
 ```bash
 # Create virtual environment
 python3 -m venv venv
@@ -91,20 +109,24 @@ source venv/bin/activate
 # (On Windows PowerShell: .\venv\Scripts\Activate.ps1)
 ```
 
-### 4. Install Dependencies
+### 5. Install Dependencies
+
 ```bash
 pip install -r requirements.txt pytest
 ```
 
-### 5. Run the Application
+### 6. Run the Application
+
 ```bash
 python app.py
 ```
 
 The server will start at:
+
 ```
 http://localhost:5000
 ```
+
 Open [http://localhost:5000](http://localhost:5000) in your browser to view the interactive Kanban Board.
 
 ---
@@ -112,11 +134,13 @@ Open [http://localhost:5000](http://localhost:5000) in your browser to view the 
 ## 🧪 Running the Tests
 
 To run the comprehensive test suite with `pytest`:
+
 ```bash
 pytest tests/test_api.py -v
 ```
 
 To run model unit tests with Python's built-in test runner:
+
 ```bash
 python -m unittest tests/test_models.py
 ```
@@ -127,22 +151,24 @@ python -m unittest tests/test_models.py
 
 Base URL: `http://localhost:5000/api`
 
-| Method | Endpoint | Description | Request Body / Query | Status Code | Example Response |
-| :--- | :--- | :--- | :--- | :---: | :--- |
-| **GET** | `/api/tasks` | List all tasks | Query: `?status=todo` *(optional)* | `200 OK` | `[{"id": "...", "title": "Design UI", ...}]` |
-| **POST** | `/api/tasks` | Create a new task | JSON `{title, description, status, priority, color}` | `201 Created` | `{"id": "...", "title": "New Task", ...}` |
-| **GET** | `/api/tasks/<id>` | Retrieve a single task | None | `200 OK` / `404 Not Found` | `{"id": "...", "title": "...", ...}` |
-| **PUT** | `/api/tasks/<id>` | Update task attributes | JSON `{status: "done", ...}` | `200 OK` / `404 Not Found` | `{"id": "...", "status": "done", ...}` |
-| **DELETE** | `/api/tasks/<id>` | Delete a task | None | `200 OK` / `404 Not Found` | `{"message": "Task deleted successfully", "id": "..."}` |
-| **GET** | `/api/stats` | Dashboard metrics | None | `200 OK` | `{"total": 6, "by_status": {...}, "by_priority": {...}}` |
+| Method     | Endpoint          | Description            | Request Body / Query                                 |        Status Code         | Example Response                                         |
+| :--------- | :---------------- | :--------------------- | :--------------------------------------------------- | :------------------------: | :------------------------------------------------------- |
+| **GET**    | `/api/tasks`      | List all tasks         | Query: `?status=todo` _(optional)_                   |          `200 OK`          | `[{"id": "...", "title": "Design UI", ...}]`             |
+| **POST**   | `/api/tasks`      | Create a new task      | JSON `{title, description, status, priority, color}` |       `201 Created`        | `{"id": "...", "title": "New Task", ...}`                |
+| **GET**    | `/api/tasks/<id>` | Retrieve a single task | None                                                 | `200 OK` / `404 Not Found` | `{"id": "...", "title": "...", ...}`                     |
+| **PUT**    | `/api/tasks/<id>` | Update task attributes | JSON `{status: "done", ...}`                         | `200 OK` / `404 Not Found` | `{"id": "...", "status": "done", ...}`                   |
+| **DELETE** | `/api/tasks/<id>` | Delete a task          | None                                                 | `200 OK` / `404 Not Found` | `{"message": "Task deleted successfully", "id": "..."}`  |
+| **GET**    | `/api/stats`      | Dashboard metrics      | None                                                 |          `200 OK`          | `{"total": 6, "by_status": {...}, "by_priority": {...}}` |
 
 ### Allowed Enumeration Values:
+
 - **`status`**: `"todo"`, `"in-progress"`, `"done"`
 - **`priority`**: `"low"`, `"medium"`, `"high"`
 
 ### Example Request Payloads
 
 #### Create Task (`POST /api/tasks`):
+
 ```json
 {
   "title": "Set up payment gateway",
@@ -154,6 +180,7 @@ Base URL: `http://localhost:5000/api`
 ```
 
 #### Update Task Status on Drop (`PUT /api/tasks/<id>`):
+
 ```json
 {
   "status": "in-progress"
@@ -161,6 +188,7 @@ Base URL: `http://localhost:5000/api`
 ```
 
 #### Get Statistics (`GET /api/stats`):
+
 ```json
 {
   "total": 6,

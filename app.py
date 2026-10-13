@@ -16,18 +16,27 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, Optional, Tuple
-from flask import Flask, jsonify, render_template, request, send_from_directory, Response
+from flask import (
+    Flask,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+    Response,
+)
 from flask_cors import CORS
 
 from models import (
     VALID_PRIORITIES,
     VALID_STATUSES,
     create_task,
+    configure_store,
     delete_task,
     get_all_tasks,
     get_stats,
     get_task,
     reset_tasks,
+    storage_info,
     update_task,
 )
 
@@ -62,11 +71,15 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     # Configuration defaults
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "kanban-secret-key-dev"),
+        MONGO_URI=os.environ.get("MONGO_URI", ""),
+        MONGO_DB_NAME=os.environ.get("MONGO_DB_NAME", "taskflow"),
         JSON_SORT_KEYS=False,
     )
 
     if test_config:
         app.config.update(test_config)
+
+    configure_store(app.config.get("MONGO_URI"), app.config.get("MONGO_DB_NAME"))
 
     # -------------------------------------------------------------------------
     # REST API Endpoints
@@ -83,6 +96,18 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             JSON array of task objects and 200 HTTP status code, or 400 on invalid status.
         """
         status_filter = request.args.get("status")
+        priority_filter = request.args.get("priority")
+        search_filter = request.args.get("q", "").strip()
+
+        if priority_filter and priority_filter.strip().lower() not in VALID_PRIORITIES:
+            return (
+                jsonify(
+                    {
+                        "error": f"Invalid priority '{priority_filter}'. Valid options are: {', '.join(VALID_PRIORITIES)}."
+                    }
+                ),
+                400,
+            )
 
         if status_filter:
             status_clean = status_filter.strip().lower()
@@ -98,9 +123,11 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
                     ),
                     400,
                 )
-            tasks = get_all_tasks(status=status_clean)
+            tasks = get_all_tasks(
+                status=status_clean, priority=priority_filter, search=search_filter
+            )
         else:
-            tasks = get_all_tasks()
+            tasks = get_all_tasks(priority=priority_filter, search=search_filter)
 
         return jsonify(tasks), 200
 
@@ -213,6 +240,16 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         stats = get_stats()
         return jsonify(stats), 200
 
+    @app.route("/api/health", methods=["GET"])
+    def health() -> Tuple[Response, int]:
+        """Return a lightweight service and storage status for deployment checks."""
+        return (
+            jsonify(
+                {"status": "healthy", "service": "taskflow", "storage": storage_info()}
+            ),
+            200,
+        )
+
     # -------------------------------------------------------------------------
     # Web UI & Static File Serving
     # -------------------------------------------------------------------------
@@ -280,7 +317,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     host = os.environ.get("HOST", "0.0.0.0")
     print(f"🚀 Kanban Task Board Server starting at http://{host}:{port}")
     app.run(host=host, port=port, debug=True)

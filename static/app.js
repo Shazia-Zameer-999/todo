@@ -42,6 +42,8 @@ const elements = {
   html: document.documentElement,
   themeToggle: document.getElementById('theme-toggle'),
   themeIcon: document.getElementById('theme-icon'),
+  searchInput: document.getElementById('search-input'),
+  priorityFilter: document.getElementById('priority-filter'),
 
   // Stats
   statTotal: document.getElementById('stat-total'),
@@ -72,6 +74,9 @@ const elements = {
   selectTaskStatus: document.getElementById('task-status'),
   selectTaskPriority: document.getElementById('task-priority'),
   inputTaskColor: document.getElementById('task-color'),
+  inputTaskAssignee: document.getElementById('task-assignee'),
+  inputTaskDueDate: document.getElementById('task-due-date'),
+  inputTaskTags: document.getElementById('task-tags'),
   labelColorHex: document.getElementById('color-hex-label'),
   colorSwatches: document.getElementById('color-swatches'),
   titleError: document.getElementById('title-error'),
@@ -271,7 +276,7 @@ const api = {
 function initTheme() {
   const savedTheme = localStorage.getItem('taskflow-theme');
   const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  
+
   const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
   applyTheme(initialTheme);
 
@@ -323,7 +328,14 @@ function renderBoard() {
     'done': [],
   };
 
-  state.tasks.forEach((task) => {
+  const query = (elements.searchInput?.value || '').trim().toLowerCase();
+  const priority = elements.priorityFilter?.value || 'all';
+  const visibleTasks = state.tasks.filter((task) => {
+    const haystack = `${task.title} ${task.description || ''} ${(task.tags || []).join(' ')}`.toLowerCase();
+    return (!query || haystack.includes(query)) && (priority === 'all' || task.priority === priority);
+  });
+
+  visibleTasks.forEach((task) => {
     const norm = normalizeStatus(task.status);
     if (grouped[norm]) {
       grouped[norm].push(task);
@@ -392,15 +404,16 @@ function createTaskCardElement(task) {
         </button>
       </div>
     </div>
-    ${
-      task.description
-        ? `<p class="card-description">${escapeHtml(task.description)}</p>`
-        : ''
+    ${task.description
+      ? `<p class="card-description">${escapeHtml(task.description)}</p>`
+      : ''
     }
     <div class="card-footer">
       <div class="card-meta">
         <span class="badge-priority ${priorityBadgeClass}">${escapeHtml(priority)}</span>
+        ${(task.tags || []).slice(0, 2).map((tag) => `<span class="task-tag">${escapeHtml(tag)}</span>`).join('')}
       </div>
+      <span class="card-due-date">${task.due_date ? `Due ${escapeHtml(task.due_date)}` : ''}</span>
     </div>
   `;
 
@@ -470,7 +483,7 @@ function updateStats() {
 function handleDragStart(e) {
   const card = e.currentTarget;
   state.activeDragTaskId = card.dataset.taskId;
-  
+
   if (e.dataTransfer) {
     e.dataTransfer.setData('text/plain', card.dataset.taskId);
     e.dataTransfer.effectAllowed = 'move';
@@ -580,6 +593,9 @@ function openCreateTaskModal(defaultStatus = 'todo') {
   elements.inputTaskId.value = '';
   elements.selectTaskStatus.value = normalizeStatus(defaultStatus);
   elements.selectTaskPriority.value = 'medium';
+  elements.inputTaskAssignee.value = '';
+  elements.inputTaskDueDate.value = '';
+  elements.inputTaskTags.value = '';
 
   // Default color: Indigo
   setColorPickerValue('#6366f1');
@@ -607,6 +623,9 @@ function openEditTaskModal(taskId) {
   elements.inputTaskDesc.value = task.description || '';
   elements.selectTaskStatus.value = normalizeStatus(task.status);
   elements.selectTaskPriority.value = (task.priority || 'medium').toLowerCase();
+  elements.inputTaskAssignee.value = task.assignee || '';
+  elements.inputTaskDueDate.value = task.due_date || '';
+  elements.inputTaskTags.value = (task.tags || []).join(', ');
 
   setColorPickerValue(task.color || '#6366f1');
 
@@ -669,6 +688,9 @@ async function handleTaskFormSubmit(e) {
   const status = normalizeStatus(elements.selectTaskStatus.value);
   const priority = elements.selectTaskPriority.value.toLowerCase();
   const color = elements.inputTaskColor.value;
+  const assignee = elements.inputTaskAssignee.value.trim();
+  const due_date = elements.inputTaskDueDate.value;
+  const tags = elements.inputTaskTags.value.split(',').map((tag) => tag.trim()).filter(Boolean);
 
   const payload = {
     title,
@@ -676,6 +698,9 @@ async function handleTaskFormSubmit(e) {
     status,
     priority,
     color,
+    assignee,
+    due_date,
+    tags,
   };
 
   const isEditing = Boolean(state.editingTaskId);
@@ -823,6 +848,15 @@ function bindEvents() {
       setColorPickerValue(e.target.value);
     });
   }
+
+  if (elements.searchInput) elements.searchInput.addEventListener('input', renderBoard);
+  if (elements.priorityFilter) elements.priorityFilter.addEventListener('change', renderBoard);
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      elements.searchInput?.focus();
+    }
+  });
 
   // Keyboard Shortcuts: Escape key closes modals
   document.addEventListener('keydown', (e) => {

@@ -1,29 +1,22 @@
-"""
-In-memory data store for the Kanban Task Board application.
-
-Provides lightweight model management without external database dependencies.
-Includes data models, seed tasks, validation rules, and CRUD operations.
-"""
+"""Task persistence, validation, and dashboard aggregation."""
 
 from __future__ import annotations
 
 import copy
+import os
+import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-import uuid
 
-# Valid enumeration values for task attributes
+try:
+    from pymongo import MongoClient
+except ImportError:  # pragma: no cover
+    MongoClient = None
+
 VALID_STATUSES = ("todo", "in-progress", "done")
 VALID_PRIORITIES = ("low", "medium", "high")
-
-# Default color mapping for priorities if not custom specified
-PRIORITY_COLORS: Dict[str, str] = {
-    "low": "#10b981",       # Emerald green
-    "medium": "#f59e0b",    # Amber / Orange
-    "high": "#ef4444",      # Crimson red
-}
-
-# Initial seed data with 6 sample tasks spread across statuses
+PRIORITY_COLORS = {"low": "#10b981", "medium": "#f59e0b", "high": "#ef4444"}
 SEED_TASKS: List[Dict[str, Any]] = [
     {
         "id": "11111111-1111-4111-8111-111111111111",
@@ -32,6 +25,10 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "todo",
         "priority": "high",
         "created_at": "2026-09-18T09:00:00Z",
+        "updated_at": "2026-09-18T09:00:00Z",
+        "due_date": "2026-10-20",
+        "tags": ["design", "product"],
+        "assignee": "Maya",
         "color": "#ef4444",
     },
     {
@@ -41,6 +38,10 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "todo",
         "priority": "medium",
         "created_at": "2026-09-18T10:15:00Z",
+        "updated_at": "2026-09-18T10:15:00Z",
+        "due_date": "2026-10-24",
+        "tags": ["backend", "security"],
+        "assignee": "Noah",
         "color": "#f59e0b",
     },
     {
@@ -50,6 +51,10 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "in-progress",
         "priority": "high",
         "created_at": "2026-09-18T11:30:00Z",
+        "updated_at": "2026-09-22T11:30:00Z",
+        "due_date": "2026-10-18",
+        "tags": ["frontend", "design"],
+        "assignee": "Maya",
         "color": "#3b82f6",
     },
     {
@@ -59,6 +64,10 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "in-progress",
         "priority": "medium",
         "created_at": "2026-09-18T13:00:00Z",
+        "updated_at": "2026-09-23T13:00:00Z",
+        "due_date": "2026-10-22",
+        "tags": ["backend", "testing"],
+        "assignee": "Ava",
         "color": "#8b5cf6",
     },
     {
@@ -68,6 +77,10 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "done",
         "priority": "low",
         "created_at": "2026-09-17T14:20:00Z",
+        "updated_at": "2026-09-20T14:20:00Z",
+        "due_date": "2026-09-20",
+        "tags": ["devops"],
+        "assignee": "Noah",
         "color": "#10b981",
     },
     {
@@ -77,224 +90,279 @@ SEED_TASKS: List[Dict[str, Any]] = [
         "status": "done",
         "priority": "low",
         "created_at": "2026-09-17T16:45:00Z",
+        "updated_at": "2026-09-21T16:45:00Z",
+        "due_date": "2026-09-21",
+        "tags": ["devops", "testing"],
+        "assignee": "Ava",
         "color": "#06b6d4",
     },
 ]
 
-# Internal in-memory store: Dict[task_id, task_dict]
-_TASKS: Dict[str, Dict[str, Any]] = {task["id"]: copy.deepcopy(task) for task in SEED_TASKS}
+_TASKS = {task["id"]: copy.deepcopy(task) for task in SEED_TASKS}
+_mongo_collection = None
+_mongo_uri = ""
+
+
+def configure_store(uri: Optional[str] = None, database: Optional[str] = None) -> None:
+    global _mongo_collection, _mongo_uri
+    _mongo_uri = (uri or "").strip()
+    _mongo_collection = None
+    if _mongo_uri and MongoClient is not None:
+        client = MongoClient(_mongo_uri, serverSelectionTimeoutMS=2500)
+        db = database or os.environ.get("MONGO_DB_NAME", "taskflow")
+        _mongo_collection = client[db]["tasks"]
+
+
+def storage_info() -> Dict[str, Any]:
+    return {
+        "provider": "mongodb" if _mongo_collection is not None else "memory",
+        "database_configured": bool(_mongo_uri),
+    }
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ensure_mongo_seed() -> None:
+    if (
+        _mongo_collection is not None
+        and _mongo_collection.count_documents({}, limit=1) == 0
+    ):
+        _mongo_collection.insert_many(copy.deepcopy(SEED_TASKS))
+
+
+def _mongo_call(action: Any, fallback: Any) -> Any:
+    try:
+        _ensure_mongo_seed()
+        return action()
+    except Exception:
+        return fallback()
+
+
+def _clean_task(task: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if task is None:
+        return None
+    task = copy.deepcopy(task)
+    task.pop("_id", None)
+    task.setdefault("description", "")
+    task.setdefault("tags", [])
+    task.setdefault("assignee", "")
+    task.setdefault("due_date", "")
+    task.setdefault("updated_at", task.get("created_at", _now()))
+    return task
 
 
 def reset_tasks() -> None:
-    """Reset the in-memory task repository to the original 6 seed tasks.
-
-    Useful for isolating test suites and refreshing demo environments.
-    """
     global _TASKS
     _TASKS = {task["id"]: copy.deepcopy(task) for task in SEED_TASKS}
+    if _mongo_collection is not None:
+        try:
+            _mongo_collection.delete_many({})
+            _mongo_collection.insert_many(copy.deepcopy(SEED_TASKS))
+        except Exception:
+            pass
 
 
-def get_all_tasks(status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve all tasks from the store, optionally filtered by status.
-
-    Args:
-        status: Optional status string ('todo', 'in-progress', or 'done') to filter by.
-
-    Returns:
-        A list of task dictionaries ordered by creation time.
-    """
-    tasks = list(_TASKS.values())
-    if status is not None:
-        status_clean = status.strip().lower()
-        tasks = [t for t in tasks if t["status"] == status_clean]
-
-    # Return deep copies so external modifications do not affect store directly
-    return copy.deepcopy(tasks)
-
-
-def get_task(task_id: str) -> Optional[Dict[str, Any]]:
-    """Retrieve a single task by its unique identifier.
-
-    Args:
-        task_id: The UUID string of the task.
-
-    Returns:
-        The task dictionary if found, otherwise None.
-    """
-    task = _TASKS.get(task_id)
-    if task is None:
-        return None
-    return copy.deepcopy(task)
-
-
-def create_task(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create and persist a new task in the store.
-
-    Args:
-        data: Dictionary containing task attributes:
-            - title (required, non-empty string)
-            - description (optional string, defaults to '')
-            - status (optional string, defaults to 'todo')
-            - priority (optional string, defaults to 'medium')
-            - color (optional hex string, defaults to priority default)
-
-    Returns:
-        The newly created task dictionary including generated id and created_at.
-
-    Raises:
-        ValueError: If title is missing/empty, or if status/priority values are invalid.
-    """
-    if not isinstance(data, dict):
-        raise ValueError("Task data must be a dictionary.")
-
-    title = data.get("title")
-    if not title or not isinstance(title, str) or not title.strip():
+def _validate(
+    data: Dict[str, Any], existing: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    title = data.get("title", existing.get("title") if existing else None)
+    if not isinstance(title, str) or not title.strip():
         raise ValueError("Task 'title' is required and cannot be empty.")
-
-    status = data.get("status", "todo")
+    status = data.get("status", existing.get("status", "todo") if existing else "todo")
+    priority = data.get(
+        "priority", existing.get("priority", "medium") if existing else "medium"
+    )
     if not isinstance(status, str) or status.strip().lower() not in VALID_STATUSES:
         raise ValueError(
             f"Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}."
         )
-    status = status.strip().lower()
-
-    priority = data.get("priority", "medium")
-    if not isinstance(priority, str) or priority.strip().lower() not in VALID_PRIORITIES:
+    if (
+        not isinstance(priority, str)
+        or priority.strip().lower() not in VALID_PRIORITIES
+    ):
         raise ValueError(
             f"Invalid priority '{priority}'. Must be one of: {', '.join(VALID_PRIORITIES)}."
         )
-    priority = priority.strip().lower()
-
-    description = data.get("description", "")
-    if description is None:
-        description = ""
-    elif not isinstance(description, str):
-        description = str(description)
-    description = description.strip()
-
-    # Determine card accent color
-    color = data.get("color")
-    if not color or not isinstance(color, str) or not color.strip():
-        color = PRIORITY_COLORS.get(priority, "#3b82f6")
-    else:
-        color = color.strip()
-
-    task_id = str(uuid.uuid4())
-    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    new_task: Dict[str, Any] = {
-        "id": task_id,
+    tags = data.get("tags", existing.get("tags", []) if existing else [])
+    if isinstance(tags, str):
+        tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    if not isinstance(tags, list):
+        raise ValueError("Task 'tags' must be an array of labels.")
+    tags = [str(tag).strip() for tag in tags if str(tag).strip()][:8]
+    due_date = (
+        data.get("due_date", existing.get("due_date", "") if existing else "") or ""
+    )
+    if due_date and (
+        not isinstance(due_date, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", due_date)
+    ):
+        raise ValueError("Task 'due_date' must use YYYY-MM-DD format.")
+    color = data.get("color", existing.get("color") if existing else None)
+    if not isinstance(color, str) or not color.strip():
+        color = PRIORITY_COLORS[priority.strip().lower()]
+    return {
         "title": title.strip(),
-        "description": description,
-        "status": status,
-        "priority": priority,
-        "created_at": created_at,
-        "color": color,
+        "description": str(
+            data.get("description", existing.get("description", "") if existing else "")
+            or ""
+        ).strip(),
+        "status": status.strip().lower(),
+        "priority": priority.strip().lower(),
+        "color": color.strip(),
+        "tags": tags,
+        "assignee": str(
+            data.get("assignee", existing.get("assignee", "") if existing else "") or ""
+        ).strip()[:80],
+        "due_date": due_date,
     }
 
-    _TASKS[task_id] = new_task
-    return copy.deepcopy(new_task)
+
+def get_all_tasks(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    if _mongo_collection is not None:
+
+        def read() -> List[Dict[str, Any]]:
+            query: Dict[str, Any] = {}
+            if status:
+                query["status"] = status.strip().lower()
+            if priority:
+                query["priority"] = priority.strip().lower()
+            if search:
+                query["$or"] = [
+                    {"title": {"$regex": re.escape(search), "$options": "i"}},
+                    {"description": {"$regex": re.escape(search), "$options": "i"}},
+                    {"tags": {"$regex": re.escape(search), "$options": "i"}},
+                ]
+            return [
+                _clean_task(task)
+                for task in _mongo_collection.find(query).sort("created_at", 1)
+            ]
+
+        return _mongo_call(read, lambda: get_all_tasks_memory(status, priority, search))
+    return get_all_tasks_memory(status, priority, search)
 
 
-def update_task(task_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Update attributes of an existing task.
+def get_all_tasks_memory(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    tasks = list(_TASKS.values())
+    needle = search.strip().lower() if search else ""
+    return copy.deepcopy(
+        [
+            task
+            for task in tasks
+            if (not status or task["status"] == status.strip().lower())
+            and (not priority or task["priority"] == priority.strip().lower())
+            and (
+                not needle
+                or needle in task["title"].lower()
+                or needle in task.get("description", "").lower()
+                or any(needle in tag.lower() for tag in task.get("tags", []))
+            )
+        ]
+    )
 
-    Args:
-        task_id: The UUID string of the task to update.
-        data: Dictionary of fields to update (title, description, status, priority, color).
 
-    Returns:
-        The updated task dictionary if found, otherwise None.
+def get_task(task_id: str) -> Optional[Dict[str, Any]]:
+    if _mongo_collection is not None:
+        return _mongo_call(
+            lambda: _clean_task(_mongo_collection.find_one({"id": task_id})),
+            lambda: copy.deepcopy(_TASKS.get(task_id)),
+        )
+    return copy.deepcopy(_TASKS.get(task_id))
 
-    Raises:
-        ValueError: If any provided field value is invalid.
-    """
+
+def create_task(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
-        raise ValueError("Update data must be a dictionary.")
+        raise ValueError("Task data must be a dictionary.")
+    task = _validate(data)
+    task.update({"id": str(uuid.uuid4()), "created_at": _now(), "updated_at": _now()})
+    if _mongo_collection is not None:
+        return _mongo_call(
+            lambda: (
+                _mongo_collection.insert_one(copy.deepcopy(task)),
+                _clean_task(task),
+            )[1],
+            lambda: _create_memory(task),
+        )
+    return _create_memory(task)
 
-    task = _TASKS.get(task_id)
-    if task is None:
-        return None
 
-    # Validate title if present
-    if "title" in data:
-        title = data["title"]
-        if not title or not isinstance(title, str) or not title.strip():
-            raise ValueError("Task 'title' cannot be empty.")
-        task["title"] = title.strip()
-
-    # Validate status if present
-    if "status" in data:
-        status = data["status"]
-        if not isinstance(status, str) or status.strip().lower() not in VALID_STATUSES:
-            raise ValueError(
-                f"Invalid status '{status}'. Must be one of: {', '.join(VALID_STATUSES)}."
-            )
-        task["status"] = status.strip().lower()
-
-    # Validate priority if present
-    if "priority" in data:
-        priority = data["priority"]
-        if not isinstance(priority, str) or priority.strip().lower() not in VALID_PRIORITIES:
-            raise ValueError(
-                f"Invalid priority '{priority}'. Must be one of: {', '.join(VALID_PRIORITIES)}."
-            )
-        task["priority"] = priority.strip().lower()
-        # If color wasn't explicitly provided, sync color with new priority
-        if "color" not in data:
-            task["color"] = PRIORITY_COLORS.get(task["priority"], task.get("color", "#3b82f6"))
-
-    # Update description if present
-    if "description" in data:
-        desc = data["description"]
-        task["description"] = "" if desc is None else str(desc).strip()
-
-    # Update color if present
-    if "color" in data:
-        col = data["color"]
-        if col and isinstance(col, str) and col.strip():
-            task["color"] = col.strip()
-
+def _create_memory(task: Dict[str, Any]) -> Dict[str, Any]:
+    _TASKS[task["id"]] = copy.deepcopy(task)
     return copy.deepcopy(task)
 
 
+def update_task(task_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    existing = get_task(task_id)
+    if existing is None:
+        return None
+    task = _validate(data, existing)
+    task["updated_at"] = _now()
+    if "priority" in data and "color" not in data:
+        task["color"] = PRIORITY_COLORS[task["priority"]]
+    if _mongo_collection is not None:
+        return _mongo_call(
+            lambda: (
+                _mongo_collection.update_one({"id": task_id}, {"$set": task}),
+                _clean_task({**existing, **task}),
+            )[1],
+            lambda: _update_memory(task_id, task),
+        )
+    return _update_memory(task_id, task)
+
+
+def _update_memory(task_id: str, task: Dict[str, Any]) -> Dict[str, Any]:
+    _TASKS[task_id].update(copy.deepcopy(task))
+    return copy.deepcopy(_TASKS[task_id])
+
+
 def delete_task(task_id: str) -> bool:
-    """Delete a task from the in-memory store by ID.
+    if _mongo_collection is not None:
+        return _mongo_call(
+            lambda: _mongo_collection.delete_one({"id": task_id}).deleted_count > 0,
+            lambda: _delete_memory(task_id),
+        )
+    return _delete_memory(task_id)
 
-    Args:
-        task_id: The UUID string of the task to delete.
 
-    Returns:
-        True if the task was found and deleted, False otherwise.
-    """
-    if task_id in _TASKS:
-        del _TASKS[task_id]
-        return True
-    return False
+def _delete_memory(task_id: str) -> bool:
+    return _TASKS.pop(task_id, None) is not None
 
 
 def get_stats() -> Dict[str, Any]:
-    """Calculate and return task metrics aggregated by status and priority.
-
-    Returns:
-        Dictionary containing total task count, counts by status, and counts by priority.
-    """
-    tasks = list(_TASKS.values())
-    total = len(tasks)
-
-    by_status: Dict[str, int] = {st: 0 for st in VALID_STATUSES}
-    by_priority: Dict[str, int] = {pr: 0 for pr in VALID_PRIORITIES}
-
+    tasks = get_all_tasks()
+    by_status = {status: 0 for status in VALID_STATUSES}
+    by_priority = {priority: 0 for priority in VALID_PRIORITIES}
+    overdue = 0
+    today = datetime.now(timezone.utc).date().isoformat()
     for task in tasks:
-        st = task.get("status", "")
-        pr = task.get("priority", "")
-        if st in by_status:
-            by_status[st] += 1
-        if pr in by_priority:
-            by_priority[pr] += 1
-
+        if task.get("status") in by_status:
+            by_status[task["status"]] += 1
+        if task.get("priority") in by_priority:
+            by_priority[task["priority"]] += 1
+        if (
+            task.get("due_date")
+            and task["due_date"] < today
+            and task.get("status") != "done"
+        ):
+            overdue += 1
     return {
-        "total": total,
+        "total": len(tasks),
         "by_status": by_status,
         "by_priority": by_priority,
+        "overdue": overdue,
+        "completion_rate": (
+            round((by_status["done"] / len(tasks)) * 100) if tasks else 0
+        ),
+        "storage": storage_info(),
     }
+
+
+configure_store(os.environ.get("MONGO_URI"), os.environ.get("MONGO_DB_NAME"))
