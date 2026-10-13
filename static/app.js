@@ -32,6 +32,10 @@ const state = {
   taskPendingDeletionId: null,
   /** @type {'light'|'dark'} */
   theme: 'light',
+  focusSecondsRemaining: 25 * 60,
+  focusIntervalId: null,
+  audioEnabled: true,
+  audioContext: null,
 };
 
 /* ==========================================================================
@@ -44,12 +48,23 @@ const elements = {
   themeIcon: document.getElementById('theme-icon'),
   searchInput: document.getElementById('search-input'),
   priorityFilter: document.getElementById('priority-filter'),
+  viewFilter: document.getElementById('view-filter'),
+  sortFilter: document.getElementById('sort-filter'),
+  focusTime: document.getElementById('focus-time'),
+  focusToggle: document.getElementById('focus-toggle'),
+  focusReset: document.getElementById('focus-reset'),
+  audioToggle: document.getElementById('audio-toggle'),
+  audioIcon: document.getElementById('audio-icon'),
+  notificationToggle: document.getElementById('notification-toggle'),
 
   // Stats
   statTotal: document.getElementById('stat-total'),
   statTodo: document.getElementById('stat-todo'),
   statInProgress: document.getElementById('stat-in-progress'),
   statDone: document.getElementById('stat-done'),
+  completionLabel: document.getElementById('completion-label'),
+  completionFill: document.getElementById('completion-fill'),
+  encouragement: document.getElementById('encouragement'),
 
   // Column Task Lists & Counts
   listTodo: document.getElementById('list-todo'),
@@ -77,6 +92,7 @@ const elements = {
   inputTaskAssignee: document.getElementById('task-assignee'),
   inputTaskDueDate: document.getElementById('task-due-date'),
   inputTaskTags: document.getElementById('task-tags'),
+  inputTaskEstimate: document.getElementById('task-estimate'),
   labelColorHex: document.getElementById('color-hex-label'),
   colorSwatches: document.getElementById('color-swatches'),
   titleError: document.getElementById('title-error'),
@@ -285,7 +301,6 @@ function initTheme() {
       const newTheme = state.theme === 'dark' ? 'light' : 'dark';
       applyTheme(newTheme);
       localStorage.setItem('taskflow-theme', newTheme);
-      showToast(`Switched to ${newTheme} mode`, 'info', 2000);
     });
   }
 }
@@ -299,6 +314,147 @@ function applyTheme(theme) {
   elements.html.setAttribute('data-theme', theme);
   if (elements.themeIcon) {
     elements.themeIcon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  }
+}
+
+function getAudioContext() {
+  if (!state.audioContext) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    state.audioContext = new AudioContext();
+  }
+  if (state.audioContext.state === 'suspended') state.audioContext.resume();
+  return state.audioContext;
+}
+
+function playTone(frequency, startAt, duration, volume = 0.06) {
+  if (!state.audioEnabled) return;
+  const context = getAudioContext();
+  if (!context) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + duration + 0.03);
+}
+
+function playCompletionChime() {
+  const context = getAudioContext();
+  if (!context || !state.audioEnabled) return;
+  const startAt = context.currentTime;
+  playTone(523.25, startAt, 0.22);
+  playTone(659.25, startAt + 0.16, 0.24);
+  playTone(783.99, startAt + 0.32, 0.42, 0.07);
+}
+
+function updateAudioControl() {
+  if (!elements.audioToggle) return;
+  elements.audioToggle.setAttribute('aria-pressed', String(state.audioEnabled));
+  elements.audioToggle.title = state.audioEnabled ? 'Focus sounds on' : 'Focus sounds off';
+  elements.audioIcon.textContent = state.audioEnabled ? '🔔' : '🔕';
+}
+
+function notifyUser(title, body) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body });
+  }
+}
+
+async function requestStudyReminders() {
+  if (!('Notification' in window)) {
+    showToast('This browser does not support desktop reminders.', 'info');
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      notifyUser('Studyflow reminders are on', 'You will get a gentle reminder when a focus sprint ends.');
+      showToast('Study reminders enabled.', 'success');
+    } else {
+      showToast('Reminders stay off until you allow notifications.', 'info');
+    }
+  } catch (error) {
+    showToast('Reminders are unavailable in this browser context.', 'info');
+  }
+}
+
+const encouragements = [
+  'One clear next step is enough to begin.',
+  'A short, specific sprint makes starting easier.',
+  'Progress grows from returning to the next small action.',
+  'You do not need a perfect session, just an honest one.',
+  'Finished is evidence that your plan is working.',
+];
+
+function updateEncouragement(doneCount, total) {
+  if (!elements.encouragement) return;
+  const index = total ? Math.min(Math.floor((doneCount / total) * encouragements.length), encouragements.length - 1) : 0;
+  elements.encouragement.textContent = encouragements[index];
+}
+
+function renderFocusTimer() {
+  if (!elements.focusTime) return;
+  const minutes = Math.floor(state.focusSecondsRemaining / 60).toString().padStart(2, '0');
+  const seconds = (state.focusSecondsRemaining % 60).toString().padStart(2, '0');
+  elements.focusTime.textContent = `${minutes}:${seconds}`;
+  const running = state.focusIntervalId !== null;
+  elements.focusToggle.textContent = running ? 'Pause' : 'Start';
+  elements.focusToggle.setAttribute('aria-pressed', String(running));
+  elements.focusToggle.closest('.focus-timer')?.classList.toggle('is-running', running);
+}
+
+function toggleFocusTimer() {
+  if (state.focusIntervalId !== null) {
+    clearInterval(state.focusIntervalId);
+    state.focusIntervalId = null;
+    renderFocusTimer();
+    return;
+  }
+  getAudioContext();
+  state.focusIntervalId = setInterval(() => {
+    state.focusSecondsRemaining -= 1;
+    if (state.focusSecondsRemaining <= 0) {
+      clearInterval(state.focusIntervalId);
+      state.focusIntervalId = null;
+      state.focusSecondsRemaining = 25 * 60;
+      playCompletionChime();
+      notifyUser('Focus sprint complete', 'Take a short break, then choose your next small step.');
+      showToast('Focus sprint complete. Take a short break.', 'success', 5000);
+    }
+    renderFocusTimer();
+  }, 1000);
+  renderFocusTimer();
+}
+
+function resetFocusTimer() {
+  if (state.focusIntervalId !== null) clearInterval(state.focusIntervalId);
+  state.focusIntervalId = null;
+  state.focusSecondsRemaining = 25 * 60;
+  renderFocusTimer();
+}
+
+function initAudioControls() {
+  state.audioEnabled = localStorage.getItem('studyflow-sounds') !== 'off';
+  updateAudioControl();
+  if (elements.audioToggle) {
+    elements.audioToggle.addEventListener('click', () => {
+      state.audioEnabled = !state.audioEnabled;
+      localStorage.setItem('studyflow-sounds', state.audioEnabled ? 'on' : 'off');
+      updateAudioControl();
+      if (state.audioEnabled) {
+        getAudioContext();
+        showToast('Focus sounds enabled.', 'success', 1800);
+      }
+    });
+  }
+  if (elements.notificationToggle) {
+    elements.notificationToggle.addEventListener('click', requestStudyReminders);
   }
 }
 
@@ -330,9 +486,28 @@ function renderBoard() {
 
   const query = (elements.searchInput?.value || '').trim().toLowerCase();
   const priority = elements.priorityFilter?.value || 'all';
+  const view = elements.viewFilter?.value || 'all';
+  const sort = elements.sortFilter?.value || 'due';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueSoonLimit = new Date(today);
+  dueSoonLimit.setDate(dueSoonLimit.getDate() + 7);
   const visibleTasks = state.tasks.filter((task) => {
     const haystack = `${task.title} ${task.description || ''} ${(task.tags || []).join(' ')}`.toLowerCase();
-    return (!query || haystack.includes(query)) && (priority === 'all' || task.priority === priority);
+    const dueDate = task.due_date ? new Date(`${task.due_date}T00:00:00`) : null;
+    const dueSoon = dueDate && !Number.isNaN(dueDate.valueOf()) && dueDate <= dueSoonLimit;
+    return (!query || haystack.includes(query))
+      && (priority === 'all' || task.priority === priority)
+      && (view === 'all' || (view === 'focus' && task.status !== 'done') || (view === 'due-soon' && dueSoon && task.status !== 'done'));
+  });
+
+  const priorityRank = { high: 0, medium: 1, low: 2 };
+  visibleTasks.sort((first, second) => {
+    if (sort === 'priority') return (priorityRank[first.priority] ?? 1) - (priorityRank[second.priority] ?? 1);
+    if (sort === 'newest') return String(second.created_at || '').localeCompare(String(first.created_at || ''));
+    if (!first.due_date) return 1;
+    if (!second.due_date) return -1;
+    return first.due_date.localeCompare(second.due_date);
   });
 
   visibleTasks.forEach((task) => {
@@ -413,8 +588,9 @@ function createTaskCardElement(task) {
         <span class="badge-priority ${priorityBadgeClass}">${escapeHtml(priority)}</span>
         ${(task.tags || []).slice(0, 2).map((tag) => `<span class="task-tag">${escapeHtml(tag)}</span>`).join('')}
       </div>
-      <span class="card-due-date">${task.due_date ? `Due ${escapeHtml(task.due_date)}` : ''}</span>
+      <span class="card-due-date">${task.due_date ? `Due ${escapeHtml(task.due_date)}` : ''} · ${task.estimated_minutes || 30} min</span>
     </div>
+    ${task.assignee ? `<div class="card-assignee"><span class="assignee-avatar">${escapeHtml(task.assignee.charAt(0).toUpperCase())}</span><span>Subject: ${escapeHtml(task.assignee)}</span></div>` : ''}
   `;
 
   // Attach Drag Event Handlers
@@ -466,6 +642,10 @@ function updateStats() {
   if (elements.statTodo) elements.statTodo.textContent = String(todoCount);
   if (elements.statInProgress) elements.statInProgress.textContent = String(inProgressCount);
   if (elements.statDone) elements.statDone.textContent = String(doneCount);
+  updateEncouragement(doneCount, total);
+  const completionRate = total ? Math.round((doneCount / total) * 100) : 0;
+  if (elements.completionLabel) elements.completionLabel.textContent = `${completionRate}% complete`;
+  if (elements.completionFill) elements.completionFill.style.width = `${completionRate}%`;
 
   if (elements.countTodo) elements.countTodo.textContent = String(todoCount);
   if (elements.countInProgress) elements.countInProgress.textContent = String(inProgressCount);
@@ -566,6 +746,7 @@ function initDragAndDrop() {
           priority: task.priority || 'medium',
           color: task.color || '#6366f1',
         });
+        if (newStatus === 'done') playCompletionChime();
         showToast(`Moved "${task.title}" to ${formatStatusLabel(newStatus)}`, 'success', 2500);
       } catch (err) {
         // Rollback on failure
@@ -596,6 +777,7 @@ function openCreateTaskModal(defaultStatus = 'todo') {
   elements.inputTaskAssignee.value = '';
   elements.inputTaskDueDate.value = '';
   elements.inputTaskTags.value = '';
+  elements.inputTaskEstimate.value = '30';
 
   // Default color: Indigo
   setColorPickerValue('#6366f1');
@@ -626,6 +808,7 @@ function openEditTaskModal(taskId) {
   elements.inputTaskAssignee.value = task.assignee || '';
   elements.inputTaskDueDate.value = task.due_date || '';
   elements.inputTaskTags.value = (task.tags || []).join(', ');
+  elements.inputTaskEstimate.value = task.estimated_minutes || 30;
 
   setColorPickerValue(task.color || '#6366f1');
 
@@ -691,6 +874,7 @@ async function handleTaskFormSubmit(e) {
   const assignee = elements.inputTaskAssignee.value.trim();
   const due_date = elements.inputTaskDueDate.value;
   const tags = elements.inputTaskTags.value.split(',').map((tag) => tag.trim()).filter(Boolean);
+  const estimated_minutes = Number(elements.inputTaskEstimate.value) || 30;
 
   const payload = {
     title,
@@ -701,6 +885,7 @@ async function handleTaskFormSubmit(e) {
     assignee,
     due_date,
     tags,
+    estimated_minutes,
   };
 
   const isEditing = Boolean(state.editingTaskId);
@@ -851,10 +1036,19 @@ function bindEvents() {
 
   if (elements.searchInput) elements.searchInput.addEventListener('input', renderBoard);
   if (elements.priorityFilter) elements.priorityFilter.addEventListener('change', renderBoard);
+  if (elements.viewFilter) elements.viewFilter.addEventListener('change', renderBoard);
+  if (elements.sortFilter) elements.sortFilter.addEventListener('change', renderBoard);
+  if (elements.focusToggle) elements.focusToggle.addEventListener('click', toggleFocusTimer);
+  if (elements.focusReset) elements.focusReset.addEventListener('click', resetFocusTimer);
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       elements.searchInput?.focus();
+    }
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'n'
+      && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      e.preventDefault();
+      openCreateTaskModal('todo');
     }
   });
 
@@ -876,6 +1070,8 @@ function bindEvents() {
  */
 async function initApp() {
   initTheme();
+  initAudioControls();
+  renderFocusTimer();
   bindEvents();
   initDragAndDrop();
 

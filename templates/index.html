@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f4f7f5" />
-    <title>Taskflow | Team workspace</title>
+    <title>Studyflow | Your study plan</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -20,29 +20,31 @@
     <header class="app-header">
       <div class="header-content">
         <div class="header-left">
-          <a class="brand" href="/" aria-label="Taskflow home">
+          <a class="brand" href="/" aria-label="Studyflow home">
             <span class="brand-logo" aria-hidden="true">◈</span>
             <span class="brand-text"
-              ><strong class="brand-title">Taskflow</strong
-              ><span class="brand-tagline">Calm work, shipped well.</span></span
+              ><strong class="brand-title">Studyflow</strong
+              ><span class="brand-tagline"
+                >Make space for deep work.</span
+              ></span
             >
           </a>
           <div class="stats-bar" aria-label="Task summary">
             <span class="stat-pill"
               ><span class="stat-dot dot-todo"></span
-              ><span class="stat-label">To do</span
+              ><span class="stat-label">Next up</span
               ><b class="stat-value" id="stat-todo">0</b></span
             >
             <span class="stat-divider"></span>
             <span class="stat-pill"
               ><span class="stat-dot dot-in-progress"></span
-              ><span class="stat-label">Active</span
+              ><span class="stat-label">Studying</span
               ><b class="stat-value" id="stat-in-progress">0</b></span
             >
             <span class="stat-divider"></span>
             <span class="stat-pill"
               ><span class="stat-dot dot-done"></span
-              ><span class="stat-label">Done</span
+              ><span class="stat-label">Finished</span
               ><b class="stat-value" id="stat-done">0</b></span
             >
           </div>
@@ -53,7 +55,7 @@
             ><input
               id="search-input"
               type="search"
-              placeholder="Search your workspace"
+              placeholder="Search your study plan"
               autocomplete="off"
             /><kbd>⌘ K</kbd></label
           >
@@ -67,6 +69,24 @@
             <option value="medium">Medium priority</option>
             <option value="low">Low priority</option>
           </select>
+          <select
+            id="view-filter"
+            class="form-select compact-select"
+            aria-label="Choose task view"
+          >
+            <option value="all">All tasks</option>
+            <option value="due-soon">Due soon</option>
+            <option value="focus">Focus mode</option>
+          </select>
+          <select
+            id="sort-filter"
+            class="form-select compact-select"
+            aria-label="Sort tasks"
+          >
+            <option value="due">Soonest due</option>
+            <option value="priority">Priority</option>
+            <option value="newest">Recently added</option>
+          </select>
           <button
             class="btn-icon theme-toggle"
             id="theme-toggle"
@@ -75,6 +95,25 @@
             aria-label="Toggle theme"
           >
             <span id="theme-icon" class="theme-icon-display">☾</span>
+          </button>
+          <button
+            class="btn-icon"
+            id="audio-toggle"
+            type="button"
+            title="Toggle focus sounds"
+            aria-label="Toggle focus sounds"
+            aria-pressed="true"
+          >
+            <span id="audio-icon" aria-hidden="true">🔔</span>
+          </button>
+          <button
+            class="btn-icon"
+            id="notification-toggle"
+            type="button"
+            title="Enable study reminders"
+            aria-label="Enable study reminders"
+          >
+            <span aria-hidden="true">◷</span>
           </button>
           <button class="btn btn-primary" id="btn-add-task" type="button">
             <span aria-hidden="true">+</span> New task
@@ -87,14 +126,41 @@
       <section class="workspace-intro" aria-labelledby="workspace-title">
         <div>
           <p class="eyebrow">Monday, October 13, 2026</p>
-          <h1 id="workspace-title">Your team workspace</h1>
+          <h1 id="workspace-title">My study dashboard</h1>
           <p class="intro-copy">
-            A clear view of what is next, what is moving, and what is complete.
+            Turn a busy semester into a calm, doable plan.
+          </p>
+          <p class="encouragement" id="encouragement" aria-live="polite">
+            One clear next step is enough to begin.
           </p>
         </div>
-        <div class="workspace-health">
-          <span class="health-dot"></span><span>Workspace synced</span
-          ><strong id="stat-total">0</strong><span>tasks</span>
+        <div class="study-tools">
+          <div class="workspace-health">
+            <span class="health-dot"></span><span>Personal plan synced</span
+            ><strong id="stat-total">0</strong><span>tasks</span>
+          </div>
+          <div class="focus-timer" aria-label="Focus sprint timer">
+            <span class="timer-kicker">Focus sprint</span>
+            <strong id="focus-time">25:00</strong>
+            <button id="focus-toggle" class="timer-button" type="button">
+              Start
+            </button>
+            <button
+              id="focus-reset"
+              class="timer-reset"
+              type="button"
+              aria-label="Reset focus timer"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <div class="semester-progress" aria-label="Study plan completion">
+          <div class="progress-heading">
+            <span>Semester momentum</span
+            ><strong id="completion-label">0% complete</strong>
+          </div>
+          <div class="progress-track"><span id="completion-fill"></span></div>
         </div>
       </section>
       <section class="board-container" aria-label="Task board">
@@ -223,15 +289,32 @@
               </select>
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label" for="task-estimate"
+              >Estimated study time</label
+            >
+            <div class="estimate-input">
+              <input
+                id="task-estimate"
+                class="form-input"
+                type="number"
+                min="5"
+                max="600"
+                step="5"
+                value="30"
+              /><span>minutes</span>
+            </div>
+          </div>
           <div class="form-row">
             <div class="form-group flex-1">
-              <label class="form-label" for="task-assignee">Assignee</label
+              <label class="form-label" for="task-assignee"
+                >Subject / course</label
               ><input
                 id="task-assignee"
                 class="form-input"
                 type="text"
                 maxlength="80"
-                placeholder="e.g. Maya"
+                placeholder="e.g. Biology or Math"
               />
             </div>
             <div class="form-group flex-1">

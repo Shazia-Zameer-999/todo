@@ -1,6 +1,6 @@
-# 📋 Kanban Task Board
+# ◈ Studyflow
 
-A polished, responsive Kanban workspace and REST API powered by **Python**, **Flask**, and **MongoDB**. It includes persistent task management, drag-and-drop workflows, search and priority filtering, tags, assignees, due dates, theme switching, metrics, and automated test coverage.
+A polished personal study planner and REST API powered by **Python**, **Flask**, and **MongoDB**. It includes persistent task management, drag-and-drop workflows, focus sprints, due-soon and focus views, study-time estimates, course labels, completion momentum, search, sorting, themes, and automated test coverage.
 
 ---
 
@@ -51,7 +51,9 @@ A polished, responsive Kanban workspace and REST API powered by **Python**, **Fl
   - Filter tasks via query parameters (`?status=todo`, `in-progress`, `done`).
   - Aggregate dashboard statistics endpoint (`/api/stats`).
 - **Drag-and-Drop Board**: Smooth HTML5 drag-and-drop card status updates with optimistic UI rendering.
-- **Work Management**: Search title, description, and tags; filter by priority; assign owners; set due dates; and organize with up to eight tags.
+- **Study Planning**: Search title, description, and tags; filter by priority; add a course or subject; set due dates; estimate study time; sort by deadline, priority, or newest; and organize with up to eight tags.
+- **Focus & Momentum**: Run a 25-minute focus sprint, switch to Focus mode for unfinished work, view Due soon tasks, and track completion momentum at a glance.
+- **Gentle Feedback**: Optional Web Audio completion chimes for focus sprints and completed tasks, plus explicit browser reminder permission. Sound preferences are stored locally and never require an audio file or external service.
 - **Input Validation & Error Handling**: Comprehensive validation for required fields, enum statuses, priorities, and standard JSON HTTP error payloads (`400`, `404`, `405`, `500`).
 - **CORS Enabled**: Cross-Origin Resource Sharing enabled on all `/api/*` routes for seamless decoupled frontend or mobile clients.
 - **Polished Responsive UI**: Built with Tailwind CSS and responsive design supporting desktop, tablet, and mobile browsers.
@@ -212,7 +214,7 @@ Base URL: `http://localhost:5000/api`
 ```
 task-kanban/
 ├── app.py                   # Flask REST API, CORS setup, routes, static file serving
-├── models.py                # In-memory data store, seed tasks, validation, CRUD functions
+├── models.py                # MongoDB/memory repository, seed tasks, validation, CRUD functions
 ├── requirements.txt         # Production dependencies (Flask, Flask-CORS)
 ├── requirements-dev.txt     # Development/testing dependencies (Pytest)
 ├── README.md                # Project documentation and API reference

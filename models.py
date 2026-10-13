@@ -149,6 +149,7 @@ def _clean_task(task: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     task.setdefault("tags", [])
     task.setdefault("assignee", "")
     task.setdefault("due_date", "")
+    task.setdefault("estimated_minutes", 30)
     task.setdefault("updated_at", task.get("created_at", _now()))
     return task
 
@@ -198,6 +199,15 @@ def _validate(
         not isinstance(due_date, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", due_date)
     ):
         raise ValueError("Task 'due_date' must use YYYY-MM-DD format.")
+    estimated_minutes = data.get(
+        "estimated_minutes", existing.get("estimated_minutes", 30) if existing else 30
+    )
+    try:
+        estimated_minutes = int(estimated_minutes)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Task 'estimated_minutes' must be a whole number.") from error
+    if estimated_minutes < 5 or estimated_minutes > 600:
+        raise ValueError("Task 'estimated_minutes' must be between 5 and 600 minutes.")
     color = data.get("color", existing.get("color") if existing else None)
     if not isinstance(color, str) or not color.strip():
         color = PRIORITY_COLORS[priority.strip().lower()]
@@ -215,6 +225,7 @@ def _validate(
             data.get("assignee", existing.get("assignee", "") if existing else "") or ""
         ).strip()[:80],
         "due_date": due_date,
+        "estimated_minutes": estimated_minutes,
     }
 
 
@@ -255,7 +266,7 @@ def get_all_tasks_memory(
     needle = search.strip().lower() if search else ""
     return copy.deepcopy(
         [
-            task
+            _clean_task(task)
             for task in tasks
             if (not status or task["status"] == status.strip().lower())
             and (not priority or task["priority"] == priority.strip().lower())

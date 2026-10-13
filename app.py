@@ -41,6 +41,21 @@ from models import (
 )
 
 
+def load_local_environment(base_dir: str) -> None:
+    """Load simple KEY=value entries from a local .env without overriding the shell."""
+    env_path = os.path.join(base_dir, ".env")
+    if not os.path.isfile(env_path):
+        return
+    with open(env_path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key.strip(), value)
+
+
 def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
     """Create and configure an instance of the Flask application.
 
@@ -51,6 +66,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         Configured Flask application instance.
     """
     base_dir = os.path.abspath(os.path.dirname(__file__))
+    load_local_environment(base_dir)
     template_dir = os.path.join(base_dir, "templates")
     static_dir = os.path.join(base_dir, "static")
 
@@ -78,6 +94,8 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
     if test_config:
         app.config.update(test_config)
+    if app.config.get("TESTING") and not (test_config and "MONGO_URI" in test_config):
+        app.config["MONGO_URI"] = ""
 
     configure_store(app.config.get("MONGO_URI"), app.config.get("MONGO_DB_NAME"))
 
